@@ -34,7 +34,10 @@ public abstract class ActorInvoker<T>
 {
     protected abstract int _interfaceId();
 
-    public abstract Task<?> invoke(T target, int methodId, Object[] params);
+    public Task<?> invoke(T target, int methodId, Object[] params)
+    {
+        throw new com.ea.orbit.exception.MethodNotFoundException(target + " MethodId :" + methodId);
+    }
 
     /**
      * Safely invokes a method, no exceptions ever thrown, and the returned Task is always non null.
@@ -54,8 +57,7 @@ public abstract class ActorInvoker<T>
         }
         catch (Throwable ex)
         {
-            final Task<Object> exceptionTask = Task.fromException(ex);
-            return exceptionTask;
+            return Task.fromException(ex);
         }
     }
 }

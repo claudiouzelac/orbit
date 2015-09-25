@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -49,11 +50,11 @@ public class ExecutionSerializer<T>
     private static final Logger logger = LoggerFactory.getLogger(Execution.class);
     private ExecutorService executorService;
     private Map<Object, Runner> running = new HashMap<>();
-    private Object mutex = new Object();
+    private final Object mutex = new Object();
 
     public ExecutionSerializer()
     {
-        executorService = ExecutorUtils.newScalingThreadPool(1000);
+        executorService = ExecutorUtils.newScalingThreadPool(64);
     }
 
     public ExecutionSerializer(final ExecutorService executor)
@@ -161,8 +162,16 @@ public class ExecutionSerializer<T>
         }
     }
 
-    public void shutDown()
+    public void shutdown()
     {
         executorService.shutdown();
+        try
+        {
+            executorService.awaitTermination(60, TimeUnit.SECONDS);
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+        }
     }
 }

@@ -29,9 +29,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.test.actors.ISomeActor;
-import com.ea.orbit.actors.test.actors.IStatelessThing;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.test.actors.SomeActor;
+import com.ea.orbit.actors.test.actors.StatelessThing;
 
 import org.junit.Test;
 
@@ -54,36 +55,41 @@ public class DeactivationTest extends ClientTest
     @Test
     public void cleanupTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage = createStage();
-        OrbitStage client = createClient();
+        Stage stage = createStage();
+        Stage client = createClient();
 
-        ISomeActor actor1 = client.getReference(ISomeActor.class, "1000");
+        SomeActor actor1 = Actor.getReference(SomeActor.class, "1000");
 
         final Set<UUID> set = new HashSet<>();
+        client.bind();
         for (int i = 0; i < 25; i++)
         {
-            set.add(actor1.getUniqueActivationId().get());
+            set.add(actor1.getUniqueActivationId().join());
         }
         assertEquals(1, set.size());
 
         // shouldn't collect anything, since clock is moving slowly
         stage.cleanup(true);
-        set.add(actor1.getUniqueActivationId().get());
+        client.bind();
+        set.add(actor1.getUniqueActivationId().join());
         assertEquals(1, set.size());
 
+        awaitFor(() -> isIdle(stage));
         clock.incrementTimeMillis(TimeUnit.MINUTES.toMillis(20));
         stage.cleanup(true);
-        set.add(actor1.getUniqueActivationId().get());
+        client.bind();
+        set.add(actor1.getUniqueActivationId().join());
         assertEquals(2, set.size());
     }
 
+    @SuppressWarnings("unused")
     @Test
     public void statelessWorkerDeactivationTest() throws ExecutionException, InterruptedException, TimeoutException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage client = createClient();
+        Stage stage1 = createStage();
+        Stage client = createClient();
 
-        IStatelessThing actor5 = client.getReference(IStatelessThing.class, "1000");
+        StatelessThing actor5 = Actor.getReference(StatelessThing.class, "1000");
 
         final Set<UUID> set1 = new HashSet<>();
         {
@@ -103,15 +109,21 @@ public class DeactivationTest extends ClientTest
         assertTrue(set1.size() <= 100);
 
         // increment the clock
+        awaitFor(() -> isIdle(stage1));
         clock.incrementTimeMillis(TimeUnit.MINUTES.toMillis(8));
+
         // touch a single activation (that will probably not be collected)
         UUID theSurviving = actor5.getUniqueActivationId().get();
+
+        awaitFor(() -> isIdle(stage1));
         clock.incrementTimeMillis(TimeUnit.MINUTES.toMillis(8));
 
 
         // THE CLEANUP
         // this will collect all but one activation
+        awaitFor(() -> isIdle(stage1));
         stage1.cleanup(true);
+
 
         // do the shenanigans again
         final Set<UUID> set2 = new HashSet<>();
@@ -139,4 +151,5 @@ public class DeactivationTest extends ClientTest
         set2.retainAll(set1);
         assertEquals(1, set2.size());
     }
+
 }

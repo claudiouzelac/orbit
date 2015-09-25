@@ -29,33 +29,81 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.test.actors.ISomeMatch;
-import com.ea.orbit.actors.test.actors.ISomePlayer;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.cluster.NodeAddressImpl;
+import com.ea.orbit.actors.runtime.ActorKey;
+import com.ea.orbit.actors.test.actors.SomeMatch;
+import com.ea.orbit.actors.test.actors.SomePlayer;
 
 import org.junit.Test;
 
+import com.google.common.collect.Sets;
+
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
+import static org.junit.Assert.fail;
+
+@SuppressWarnings("unused")
 public class ReferenceSerializationTest extends ActorBaseTest
 {
     @Test
     public void referencePassingTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        ISomeMatch someMatch = stage1.getReference(ISomeMatch.class, "300");
-        ISomePlayer somePlayer = stage1.getReference(ISomePlayer.class, "101");
-        someMatch.addPlayer(somePlayer).get();
+        Stage stage1 = createStage();
+        SomeMatch someMatch = Actor.getReference(SomeMatch.class, "300");
+        SomePlayer somePlayer = Actor.getReference(SomePlayer.class, "101");
+        someMatch.addPlayer(somePlayer).join();
     }
 
 
     @Test
     public void passingActorInsteadOfReferenceTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        ISomeMatch someMatch = stage1.getReference(ISomeMatch.class, "300");
-        ISomePlayer somePlayer = stage1.getReference(ISomePlayer.class, "101");
-        somePlayer.joinMatch(someMatch).get();
+        Stage stage1 = createStage();
+        SomeMatch someMatch = Actor.getReference(SomeMatch.class, "300");
+        SomePlayer somePlayer = Actor.getReference(SomePlayer.class, "101");
+        somePlayer.joinMatch(someMatch).join();
     }
+
+    /**
+     * Asserts that no classes other than NodeAddress and ActorKey get into the distributed caches
+     */
+    @Test
+    public void distributedDirectoryClassesTest() throws ExecutionException, InterruptedException
+    {
+
+        Stage stage1 = createStage();
+        Stage client = createClient();
+        client.bind();
+        SomeMatch someMatch = Actor.getReference(SomeMatch.class, "300");
+        SomePlayer somePlayer = Actor.getReference(SomePlayer.class, "101");
+        somePlayer.joinMatch(someMatch).join();
+
+
+        Set<Class<?>> validClasses = Sets.newHashSet(ActorKey.class, NodeAddressImpl.class, String.class);
+
+        for (Map.Entry e : FakeGroup.get(clusterName).getCaches().entrySet())
+        {
+            Map<Object, Object> cache = (Map) e.getValue();
+            for (Map.Entry e2 : cache.entrySet())
+            {
+                Object key = e2.getKey();
+                if (!validClasses.contains(key.getClass()))
+                {
+                    fail("Invalid class found in the distributed cache: " + key.getClass());
+                }
+
+                Object value = e2.getValue();
+                if (!validClasses.contains(value.getClass()))
+                {
+                    fail("Invalid class found in the distributed cache: " + value.getClass());
+                }
+            }
+        }
+    }
+
 
 }

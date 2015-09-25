@@ -29,9 +29,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.test.actors.ISomeChatObserver;
-import com.ea.orbit.actors.test.actors.ISomeChatRoom;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.test.actors.SomeChatRoom;
 import com.ea.orbit.concurrent.Task;
 
 import org.apache.commons.lang3.tuple.Pair;
@@ -46,16 +46,17 @@ import static junit.framework.TestCase.assertNull;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+@SuppressWarnings("unused")
 public class TimerTest extends ActorBaseTest
 {
     // At the moment the clock injected to the stage is not used by the timer subsystem.
 
-    public static class SomeChatObserver implements ISomeChatObserver
+    public static class SomeChatObserver implements com.ea.orbit.actors.test.actors.SomeChatObserver
     {
-        BlockingQueue<Pair<ISomeChatObserver, String>> messagesReceived = new LinkedBlockingQueue<>();
+        BlockingQueue<Pair<com.ea.orbit.actors.test.actors.SomeChatObserver, String>> messagesReceived = new LinkedBlockingQueue<>();
 
         @Override
-        public Task<Void> receiveMessage(final ISomeChatObserver sender, final String message)
+        public Task<Void> receiveMessage(final com.ea.orbit.actors.test.actors.SomeChatObserver sender, final String message)
         {
             messagesReceived.add(Pair.of(sender, message));
             return Task.done();
@@ -65,16 +66,17 @@ public class TimerTest extends ActorBaseTest
     @Test
     public void timerTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage frontend = createClient();
+        Stage stage1 = createStage();
+        Stage frontend = createClient();
 
-        ISomeChatRoom chatRoom = frontend.getReference(ISomeChatRoom.class, "1");
+        SomeChatRoom chatRoom = Actor.getReference(SomeChatRoom.class, "1");
         SomeChatObserver observer = new SomeChatObserver();
         chatRoom.join(observer).get();
+
+        long start = System.currentTimeMillis();
         chatRoom.startCountdown(5, "counting").get();
 
         assertNotNull("counting 5", observer.messagesReceived.poll(20, TimeUnit.SECONDS).getRight());
-        long start = System.currentTimeMillis();
         assertNotNull("counting 4", observer.messagesReceived.poll(2000, TimeUnit.SECONDS).getRight());
         assertNotNull("counting 3", observer.messagesReceived.poll(5, TimeUnit.SECONDS).getRight());
         assertNotNull("counting 2", observer.messagesReceived.poll(5, TimeUnit.SECONDS).getRight());

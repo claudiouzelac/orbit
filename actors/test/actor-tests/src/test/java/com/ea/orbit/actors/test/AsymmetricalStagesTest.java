@@ -28,14 +28,15 @@
 
 package com.ea.orbit.actors.test;
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.runtime.Execution;
-import com.ea.orbit.actors.test.actors.ISomeActor;
-import com.ea.orbit.actors.test.actors.ISomeMatch;
-import com.ea.orbit.actors.test.actors.ISomePlayer;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.runtime.DefaultActorClassFinder;
 import com.ea.orbit.actors.test.actors.SomeActor;
 import com.ea.orbit.actors.test.actors.SomeMatch;
 import com.ea.orbit.actors.test.actors.SomePlayer;
+import com.ea.orbit.actors.test.actors.SomeActorImpl;
+import com.ea.orbit.actors.test.actors.SomeMatchActor;
+import com.ea.orbit.actors.test.actors.SomePlayerActor;
 import com.ea.orbit.concurrent.Task;
 
 import org.junit.Test;
@@ -48,11 +49,14 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 
 /**
  * Test nodes that do not contain the same collection of actors.
  */
+@SuppressWarnings("unused")
 public class AsymmetricalStagesTest extends ActorBaseTest
 {
 
@@ -61,26 +65,30 @@ public class AsymmetricalStagesTest extends ActorBaseTest
     public void asymmetricalNodeTest() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
     {
         // Asymmetrical nodes, one has Match other has Player, both have SomeActor
-        OrbitStage stage1 = createStage(SomeActor.class, SomePlayer.class);
-        OrbitStage stage2 = createStage(SomeActor.class, SomeMatch.class);
+        Stage stage1 = createStage(SomeMatchActor.class);
+        Stage stage2 = createStage(SomePlayerActor.class);
 
         final List<Task<String>> tasksA = new ArrayList<>();
         final List<Task<String>> tasksP = new ArrayList<>();
         final List<Task<String>> tasksM = new ArrayList<>();
 
-        stage1.getReference(ISomeMatch.class, "100_000").getNodeId().join();
-        stage2.getReference(ISomePlayer.class, "100_000").getNodeId().join();
+        stage1.bind();
+        Actor.getReference(SomeMatch.class, "100_000").getNodeId().join();
+        stage2.bind();
+        Actor.getReference(SomePlayer.class, "100_000").getNodeId().join();
 
         // touching up to 50 different actors of each type.
         for (int i = 0; i < 25; i++)
         {
-            tasksA.add(stage1.getReference(ISomeActor.class, "100_" + i).getNodeId());
-            tasksM.add(stage1.getReference(ISomeMatch.class, "100_" + i).getNodeId());
-            tasksP.add(stage1.getReference(ISomePlayer.class, "200_" + i).getNodeId());
+            stage1.bind();
+            tasksA.add(Actor.getReference(SomeActor.class, "100_" + i).getNodeId());
+            tasksM.add(Actor.getReference(SomeMatch.class, "100_" + i).getNodeId());
+            tasksP.add(Actor.getReference(SomePlayer.class, "200_" + i).getNodeId());
 
-            tasksA.add(stage2.getReference(ISomeActor.class, "100_" + i).getNodeId());
-            tasksM.add(stage2.getReference(ISomeMatch.class, "300_" + i).getNodeId());
-            tasksP.add(stage2.getReference(ISomePlayer.class, "400_" + i).getNodeId());
+            stage2.bind();
+            tasksA.add(Actor.getReference(SomeActor.class, "100_" + i).getNodeId());
+            tasksM.add(Actor.getReference(SomeMatch.class, "300_" + i).getNodeId());
+            tasksP.add(Actor.getReference(SomePlayer.class, "400_" + i).getNodeId());
         }
         final Set<String> setA = tasksA.stream().map(x -> x.join()).collect(Collectors.toSet());
         final Set<String> setM = tasksM.stream().map(x -> x.join()).collect(Collectors.toSet());
@@ -104,17 +112,23 @@ public class AsymmetricalStagesTest extends ActorBaseTest
         f.set(target, value);
     }
 
-    public OrbitStage createStage(Class<?>... classes) throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
+    public Stage createStage(Class<?>... excludedActorClasses) throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
     {
-        OrbitStage stage = new OrbitStage();
-        final Execution execution = new Execution();
-        setField(stage, "execution", execution);
-        execution.setAutoDiscovery(false);
-        execution.addActorClasses(Arrays.asList(classes));
-        stage.setMode(OrbitStage.StageMode.HOST);
+        Stage stage = new Stage();
+        List<Class<?>> excludedClasses = Arrays.asList(excludedActorClasses);
+        stage.addExtension(new DefaultActorClassFinder()
+        {
+            @Override
+            public <T extends Actor> Class<? extends T> findActorImplementation(Class<T> actorInterface)
+            {
+                Class<? extends T> c = super.findActorImplementation(actorInterface);
+                return excludedClasses.contains(c) ? null : c;
+            }
+        });
+        stage.setMode(Stage.StageMode.HOST);
         stage.setExecutionPool(commonPool);
         stage.setMessagingPool(commonPool);
-        stage.addProvider(new FakeStorageProvider(fakeDatabase));
+        stage.addExtension(new FakeStorageExtension(fakeDatabase));
         stage.setClock(clock);
         stage.setClusterName(clusterName);
         stage.setClusterPeer(new FakeClusterPeer());
@@ -126,11 +140,11 @@ public class AsymmetricalStagesTest extends ActorBaseTest
     public void waitForNodeTest() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
     {
         // Asymmetrical nodes, one has Match other has Player, both have SomeActor
-        OrbitStage stage1 = createStage(SomeActor.class, SomePlayer.class);
+        Stage stage1 = createStage(SomeActorImpl.class, SomePlayerActor.class);
 
-        final Task<String> test = stage1.getReference(ISomeMatch.class, "100").getNodeId();
+        final Task<String> test = Actor.getReference(SomeMatch.class, "100").getNodeId();
 
-        OrbitStage stage2 = createStage(SomeActor.class, SomeMatch.class);
+        Stage stage2 = createStage(SomeActorImpl.class, SomeMatchActor.class);
 
         assertNotNull(test.join());
     }

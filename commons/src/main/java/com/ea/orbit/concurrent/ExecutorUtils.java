@@ -28,13 +28,8 @@
 
 package com.ea.orbit.concurrent;
 
-import java.lang.Thread.UncaughtExceptionHandler;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -46,49 +41,6 @@ public class ExecutorUtils
             final int maxThreads)
     {
         return new ForkJoinPool(maxThreads, ForkJoinPool.defaultForkJoinWorkerThreadFactory,
-                new UncaughtExceptionHandler()
-                {
-                    @Override
-                    public void uncaughtException(Thread t, Throwable e)
-                    {
-                        logger.log(Level.SEVERE, "Uncaught Exception", e);
-                    }
-                }, false);
-    }
-
-    @Deprecated
-    public static ExecutorService newScalingThreadPool(
-            final int minThreads, final int maxThreads,
-            final long keepAlive, final TimeUnit keepAliveUnit, final int maxQueueSize)
-    {
-        final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<Runnable>(maxQueueSize)
-        {
-            private static final long serialVersionUID = -6903933921423432194L;
-
-            @Override
-            public boolean offer(Runnable e)
-            {
-                if (size() <= 1)
-                {
-                    return super.offer(e);
-                }
-                else
-                {
-                    return false;
-                }
-            }
-        };
-        return new ThreadPoolExecutor(minThreads, maxThreads,
-                keepAlive, keepAliveUnit, queue, (r, executor) -> {
-            try
-            {
-                executor.getQueue().put(r);
-            }
-            catch (InterruptedException e)
-            {
-                Thread.currentThread().interrupt();
-                return;
-            }
-        });
+                (t, e) -> logger.log(Level.SEVERE, "Uncaught Exception", e), false);
     }
 }

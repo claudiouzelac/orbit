@@ -30,7 +30,7 @@ package com.ea.orbit.container.test;
 
 import com.ea.orbit.annotation.Config;
 import com.ea.orbit.concurrent.Task;
-import com.ea.orbit.container.OrbitContainer;
+import com.ea.orbit.container.Container;
 import com.ea.orbit.container.Startable;
 
 import org.junit.Test;
@@ -56,14 +56,14 @@ public class ContainerTest
         }
 
         @Override
-        public Task start()
+        public Task<Void> start()
         {
             startCalled = true;
             return Task.done();
         }
 
         @Override
-        public Task stop()
+        public Task<Void> stop()
         {
             stopCalled = true;
             return Task.done();
@@ -72,9 +72,6 @@ public class ContainerTest
 
     public static class HelloWorldNonSingleton
     {
-        private boolean startCalled;
-        private boolean stopCalled;
-
         public String sayHello()
         {
             return "hello";
@@ -105,7 +102,7 @@ public class ContainerTest
     @Test
     public void test()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.start();
         container.stop();
     }
@@ -113,7 +110,7 @@ public class ContainerTest
     @Test
     public void helloTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorld.class);
         container.start();
         final HelloWorld hello = container.get(HelloWorld.class);
@@ -124,7 +121,7 @@ public class ContainerTest
     @Test
     public void singletonTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorld.class);
         container.start();
         final HelloWorld hello1 = container.get(HelloWorld.class);
@@ -136,7 +133,7 @@ public class ContainerTest
     @Test
     public void startableTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorld.class);
         container.start();
         final HelloWorld hello = container.get(HelloWorld.class);
@@ -149,7 +146,7 @@ public class ContainerTest
     @Test
     public void nonSingletonTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorldNonSingleton.class);
         final HelloWorldNonSingleton hello1 = container.get(HelloWorldNonSingleton.class);
         final HelloWorldNonSingleton hello2 = container.get(HelloWorldNonSingleton.class);
@@ -161,7 +158,7 @@ public class ContainerTest
     @Test
     public void nonSingletonTest2()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorldNonSingleton.class);
         container.start();
         final HelloWorldNonSingleton hello1 = container.get(HelloWorldNonSingleton.class);
@@ -174,7 +171,7 @@ public class ContainerTest
     @Test
     public void injectionTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorld.class);
         container.add(HelloHandler.class);
         container.start();
@@ -186,7 +183,7 @@ public class ContainerTest
     @Test
     public void configurationTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.setProperties(Collections.singletonMap("hello.prefix", "something"));
         container.add(HelloWorld.class);
         container.add(HelloHandler.class);
@@ -199,7 +196,7 @@ public class ContainerTest
     @Test
     public void noConfigurationTest()
     {
-        OrbitContainer container = new OrbitContainer();
+        Container container = new Container();
         container.add(HelloWorld.class);
         container.add(HelloHandler.class);
         container.start();

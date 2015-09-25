@@ -29,9 +29,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.test.actors.ISomeMatch;
-import com.ea.orbit.actors.test.actors.ISomePlayer;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.test.actors.SomeMatch;
+import com.ea.orbit.actors.test.actors.SomePlayer;
 
 import org.junit.Test;
 
@@ -40,16 +41,17 @@ import java.util.concurrent.ExecutionException;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+@SuppressWarnings("unused")
 public class PersistenceTest extends ActorBaseTest
 {
 
     @Test
     public void checkWritesTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
+        Stage stage1 = createStage();
         assertEquals(0, fakeDatabase.values().size());
-        ISomeMatch someMatch = stage1.getReference(ISomeMatch.class, "300");
-        ISomePlayer somePlayer = stage1.getReference(ISomePlayer.class, "101");
+        SomeMatch someMatch = Actor.getReference(SomeMatch.class, "300");
+        SomePlayer somePlayer = Actor.getReference(SomePlayer.class, "101");
         someMatch.addPlayer(somePlayer).get();
         assertTrue(fakeDatabase.values().size() > 0);
     }
@@ -59,18 +61,18 @@ public class PersistenceTest extends ActorBaseTest
     {
         {
             // adding some state and then tearing down the cluster.
-            OrbitStage stage1 = createStage();
+            Stage stage1 = createStage();
             assertEquals(0, fakeDatabase.values().size());
-            ISomeMatch someMatch = stage1.getReference(ISomeMatch.class, "300");
-            ISomePlayer somePlayer = stage1.getReference(ISomePlayer.class, "101");
+            SomeMatch someMatch = Actor.getReference(SomeMatch.class, "300");
+            SomePlayer somePlayer = Actor.getReference(SomePlayer.class, "101");
             someMatch.addPlayer(somePlayer).get();
             assertTrue(fakeDatabase.values().size() > 0);
             stage1.stop();
         }
         {
-            OrbitStage stage2 = createStage();
-            ISomeMatch someMatch_r2 = stage2.getReference(ISomeMatch.class, "300");
-            ISomePlayer somePlayer_r2 = stage2.getReference(ISomePlayer.class, "101");
+            Stage stage2 = createStage();
+            SomeMatch someMatch_r2 = Actor.getReference(SomeMatch.class, "300");
+            SomePlayer somePlayer_r2 = Actor.getReference(SomePlayer.class, "101");
             assertEquals(1, someMatch_r2.getPlayers().get().size());
             assertEquals(somePlayer_r2, someMatch_r2.getPlayers().get().get(0));
         }

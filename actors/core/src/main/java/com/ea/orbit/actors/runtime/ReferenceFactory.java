@@ -28,16 +28,92 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.ea.orbit.actors.runtime;
 
-import com.ea.orbit.actors.IActor;
-import com.ea.orbit.actors.IActorObserver;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.ActorObserver;
+import com.ea.orbit.actors.annotation.NoIdentity;
+import com.ea.orbit.actors.cluster.NodeAddressImpl;
+import com.ea.orbit.instrumentation.ClassPathUtils;
 
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-public interface ReferenceFactory
+public class ReferenceFactory implements RefFactory
 {
-    <T extends IActor> T getReference(Class<T> iClass, Object id);
+    private static ReferenceFactory instance = new ReferenceFactory();
+    private ConcurrentMap<Class<?>, ActorFactory<?>> factories = new ConcurrentHashMap<>();
+    private volatile ActorFactoryGenerator dynamicReferenceFactory;
 
-    int getInterfaceId(final Class<?> iClass);
+    @Override
+    public <T extends Actor> T getReference(final Class<T> iClass, final Object id)
+    {
+        ActorFactory<T> factory = getFactory(iClass);
+        return factory.createReference(String.valueOf(id));
+    }
 
-    <T extends IActorObserver> T getObserverReference(UUID nodeId, Class<T> iClass, Object id);
+    @Override
+    public <T extends ActorObserver> T getObserverReference(final UUID nodeId, final Class<T> iClass, final Object id)
+    {
+        ActorFactory<T> factory = getFactory(iClass);
+        final T reference = factory.createReference(String.valueOf(id));
+        ActorReference.setAddress((ActorReference<?>) reference, new NodeAddressImpl(nodeId));
+        return reference;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> ActorFactory<T> getFactory(final Class<T> iClass)
+    {
+        ActorFactory<T> factory = (ActorFactory<T>) factories.get(iClass);
+        if (factory == null)
+        {
+            if (!iClass.isInterface())
+            {
+                throw new IllegalArgumentException("Expecting an interface, but got: " + iClass.getName());
+            }
+            try
+            {
+                String factoryClazz = iClass.getSimpleName() + "Factory";
+                if (factoryClazz.charAt(0) == 'I')
+                {
+                    factoryClazz = factoryClazz.substring(1); // remove leading 'I'
+                }
+                factory = (ActorFactory<T>) Class.forName(ClassPathUtils.getNullSafePackageName(iClass) + "." + factoryClazz).newInstance();
+            }
+            catch (Exception e)
+            {
+                if (dynamicReferenceFactory == null)
+                {
+                    dynamicReferenceFactory = new ActorFactoryGenerator();
+                }
+                factory = dynamicReferenceFactory.getFactoryFor(iClass);
+            }
+
+            factories.put(iClass, factory);
+        }
+        return factory;
+    }
+
+    public static <T extends Actor> T ref(Class<T> actorInterface, String id)
+    {
+        if (actorInterface.isAnnotationPresent(NoIdentity.class))
+        {
+            throw new IllegalArgumentException("Shouldn't supply ids for Actors annotated with " + NoIdentity.class);
+        }
+        return instance.getReference(actorInterface, id);
+    }
+
+    public static <T extends Actor> T ref(Class<T> actorInterface)
+    {
+        if (!actorInterface.isAnnotationPresent(NoIdentity.class))
+        {
+            throw new IllegalArgumentException("Not annotated with " + NoIdentity.class);
+        }
+        return instance.getReference(actorInterface, NoIdentity.NO_IDENTITY);
+    }
+
+    public static <T extends ActorObserver> T observerRef(UUID nodeId, Class<T> actorObserverInterface, String id)
+    {
+        return instance.getObserverReference(nodeId, actorObserverInterface, id);
+    }
+
 }

@@ -29,8 +29,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.test.actors.ISomeActor;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.test.actors.SomeActor;
 
 import org.junit.Test;
 
@@ -47,30 +48,35 @@ public class FailureTest extends ActorBaseTest
     @Test
     public void nodeDropTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage stage2 = createStage();
+        Stage stage1 = createStage();
+        Stage stage2 = createStage();
 
-        ISomeActor someActor = stage1.getReference(ISomeActor.class, "1");
-        UUID uuid = someActor.getUniqueActivationId().get();
-        assertEquals("bla", someActor.sayHello("bla").get());
+        SomeActor someActor = Actor.getReference(SomeActor.class, "1");
+        stage1.bind();
+        UUID uuid = someActor.getUniqueActivationId().join();
+        assertEquals("bla", someActor.sayHello("bla").join());
 
-        OrbitStage stage3 = createStage();
-        OrbitStage stage4 = createStage();
+        Stage stage3 = createStage();
+        Stage stage4 = createStage();
 
-        ISomeActor someActor_r3 = stage3.getReference(ISomeActor.class, "1");
-        assertEquals(uuid, someActor_r3.getUniqueActivationId().get());
 
-        stage1.stop();
-        stage2.stop();
+        SomeActor someActor_r3 = Actor.getReference(SomeActor.class, "1");
+        stage3.bind();
+        assertEquals(uuid, someActor_r3.getUniqueActivationId().join());
+
+        stage1.stop().join();
+        stage2.stop().join();
 
         // a new Activation must have been created since the initial nodes where stopped.
-        final UUID secondUUID = someActor_r3.getUniqueActivationId().get();
+        stage3.bind();
+        final UUID secondUUID = someActor_r3.getUniqueActivationId().join();
         assertNotEquals(uuid, secondUUID);
-        ISomeActor someActor_r4 = stage4.getReference(ISomeActor.class, "1");
-        assertEquals(secondUUID, someActor_r4.getUniqueActivationId().get());
+        SomeActor someActor_r4 = Actor.getReference(SomeActor.class, "1");
+        stage3.bind();
+        assertEquals(secondUUID, someActor_r4.getUniqueActivationId().join());
         // BTW, timing issues will sometimes make this fail by timeout with the real network.
-        stage3.stop();
-        stage4.stop();
+        stage3.stop().join();
+        stage4.stop().join();
 
     }
 

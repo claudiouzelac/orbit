@@ -28,9 +28,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.ea.orbit.actors.runtime;
 
-import com.ea.orbit.actors.IActorObserver;
-import com.ea.orbit.actors.cluster.IClusterPeer;
-import com.ea.orbit.actors.cluster.INodeAddress;
+import com.ea.orbit.actors.cluster.ClusterPeer;
+import com.ea.orbit.actors.cluster.NodeAddress;
+import com.ea.orbit.actors.extensions.MessageSerializer;
+import com.ea.orbit.annotation.Config;
 import com.ea.orbit.concurrent.ExecutorUtils;
 import com.ea.orbit.concurrent.Task;
 import com.ea.orbit.container.Startable;
@@ -41,12 +42,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutput;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
 import java.time.Clock;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -54,7 +51,7 @@ import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 public class Messaging implements Startable
 {
@@ -64,54 +61,75 @@ public class Messaging implements Startable
     // serializes the messages
     // pass received messages to Execution
 
-    private IClusterPeer clusterPeer;
+    private ClusterPeer clusterPeer;
     private Execution execution;
-    private AtomicInteger messageIdGen = new AtomicInteger();
-    private Map<Integer, PendingResponse> pendingResponseMap = new ConcurrentHashMap<>();
-    private PriorityBlockingQueue<PendingResponse> pendingResponsesQueue = new PriorityBlockingQueue<>();
+    private final AtomicInteger messageIdGen = new AtomicInteger();
+    private final Map<Integer, PendingResponse> pendingResponseMap = new ConcurrentHashMap<>();
+    private final PriorityBlockingQueue<PendingResponse> pendingResponsesQueue = new PriorityBlockingQueue<>(50, new PendingResponseComparator());
     private Clock clock = Clock.systemUTC();
+
+    @Config("orbit.actors.defaultMessageTimeout")
     private long responseTimeoutMillis = 30_000;
-    private AtomicLong networkMessagesReceived = new AtomicLong();
-    private AtomicLong objectMessagesReceived = new AtomicLong();
-    private AtomicLong responsesReceived = new AtomicLong();
+
+    private final LongAdder networkMessagesReceived = new LongAdder();
+    private final LongAdder objectMessagesReceived = new LongAdder();
+    private final LongAdder responsesReceived = new LongAdder();
     private ExecutorService executor;
+    protected MessageSerializer messageSerializer = new JavaMessageSerializer();
 
     public void setExecution(final Execution execution)
     {
         this.execution = execution;
     }
 
-    public void setClusterPeer(final IClusterPeer clusterPeer)
+    public void setClusterPeer(final ClusterPeer clusterPeer)
     {
         this.clusterPeer = clusterPeer;
     }
 
-    public INodeAddress getNodeAddress()
+    public void setResponseTimeoutMillis(final long responseTimeoutMillis)
+    {
+        this.responseTimeoutMillis = responseTimeoutMillis;
+    }
+
+    public NodeAddress getNodeAddress()
     {
         return clusterPeer.localAddress();
     }
 
-    private static class PendingResponse extends Task implements Comparable<PendingResponse>
+    /**
+     * The messageId is used only to break a tie between messages that timeout at the same ms.
+     */
+    static class PendingResponseComparator implements Comparator<PendingResponse>
     {
-        long timeoutAt;
-        public int messageId;
-
         @Override
-        public int compareTo(final PendingResponse o)
+        public int compare(final PendingResponse o1, final PendingResponse o2)
         {
-            int cmp = Long.compare(timeoutAt, o.timeoutAt);
+            int cmp = Long.compare(o1.timeoutAt, o2.timeoutAt);
             if (cmp == 0)
             {
-                return messageId - o.messageId;
+                return o1.messageId - o2.messageId;
             }
             return cmp;
         }
+    }
 
-        @Override
-        public boolean equals(final Object o)
+    /**
+     * The case of the messageId cycling back was considered during design. It should not be a problem
+     * as long as it doesn't happen in less time than the message timeout.
+     *
+     * Let's assume a very high number of messages per node: 1.000.000 msg/s => messageId cycles in ~4200 seconds (~70 minutes).
+     * (if the message timeout remains in the order of 30s to a few minutes, that should not be a problem).
+     */
+    static class PendingResponse extends Task<Object>
+    {
+        final int messageId;
+        final long timeoutAt;
+
+        public PendingResponse(final int messageId, final long timeoutAt)
         {
-            // adding equals implementation to silence FindBugs
-            return (this == o);
+            this.messageId = messageId;
+            this.timeoutAt = timeoutAt;
         }
 
         @Override
@@ -132,11 +150,11 @@ public class Messaging implements Startable
         this.clock = clock;
     }
 
-    public Task start()
+    public Task<?> start()
     {
         if (executor == null)
         {
-            executor = ExecutorUtils.newScalingThreadPool(1000);
+            executor = ExecutorUtils.newScalingThreadPool(64);
         }
         clusterPeer.registerMessageReceiver((from, buff) -> executor.execute(() -> onMessageReceived(from, buff)));
         //timeoutCleanup()
@@ -144,7 +162,7 @@ public class Messaging implements Startable
     }
 
     @Override
-    public Task stop()
+    public Task<?> stop()
     {
         executor.shutdown();
         try
@@ -158,43 +176,34 @@ public class Messaging implements Startable
         return Task.done();
     }
 
-    private void onMessageReceived(final INodeAddress from, final byte[] buff)
+    private void onMessageReceived(final NodeAddress from, final byte[] buff)
     {
         // deserialize and send to runtime
         try
         {
-            networkMessagesReceived.incrementAndGet();
-            ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(buff));
-            byte messageType = in.readByte();
-            int messageId = in.readInt();
-            switch (messageType)
+            networkMessagesReceived.increment();
+            Message message = messageSerializer.deserializeMessage(execution, new ByteArrayInputStream(buff));
+            message.withFromNode(from);
+            switch (message.getMessageType())
             {
-                case 0:
-                case 8:
-                    boolean oneway = (messageType == 8);
-                    objectMessagesReceived.incrementAndGet();
-                    int interfaceId = in.readInt();
-                    int methodId = in.readInt();
-                    Object key = in.readObject();
-                    Object[] params = (Object[]) in.readObject();
-                    execution.onMessageReceived(from, oneway, messageId, interfaceId, methodId, key, params);
-                    break;
-                case 1:
-                case 2:
-                case 3:
+                case MessageDefinitions.NORMAL_MESSAGE:
+                case MessageDefinitions.ONEWAY_MESSAGE:
+                    execution.onMessageReceived(message);
+                    return;
+
+                case MessageDefinitions.NORMAL_RESPONSE:
+                case MessageDefinitions.EXCEPTION_RESPONSE:
+                case MessageDefinitions.ERROR_RESPONSE:
                 {
-                    responsesReceived.incrementAndGet();
-                    // 1 - normal response
-                    // 2 - exception response
-                    // 3 - error but exception provided
-                    PendingResponse pendingResponse = pendingResponseMap.remove(messageId);
+                    responsesReceived.increment();
+                    PendingResponse pendingResponse = pendingResponseMap.remove(message.getMessageId());
                     if (pendingResponse != null)
                     {
                         pendingResponsesQueue.remove(pendingResponse);
                         Object res;
                         try
                         {
-                            res = in.readObject();
+                            res = message.getPayload();
                         }
                         catch (Exception ex)
                         {
@@ -202,32 +211,35 @@ public class Messaging implements Startable
                             pendingResponse.internalCompleteExceptionally(new UncheckedException("Error deserializing response", ex));
                             return;
                         }
-                        switch (messageType)
+                        switch (message.getMessageType())
                         {
-                            case 1:
+                            case MessageDefinitions.NORMAL_RESPONSE:
                                 pendingResponse.internalComplete(res);
                                 return;
-                            case 2:
+                            case MessageDefinitions.EXCEPTION_RESPONSE:
                                 pendingResponse.internalCompleteExceptionally((Throwable) res);
                                 return;
-                            case 3:
-                                pendingResponse.internalCompleteExceptionally(new UncheckedException("Error invoking but no exception provided. Res: " + res));
+                            case MessageDefinitions.ERROR_RESPONSE:
+                                pendingResponse.internalCompleteExceptionally(
+                                        new UncheckedException("Error invoking but no exception provided. Response: " + res));
                                 return;
                             default:
                                 // should be impossible
-                                logger.error("Illegal protocol, invalid response message type: {}", messageId);
+                                logger.error("Illegal protocol, invalid response message type: {}",
+                                        message.getMessageType());
                                 return;
                         }
                     }
                     else
                     {
                         // missing counterpart
-                        logger.warn("Missing counterpart (pending message) for message {}.", messageId);
+                        logger.warn("Missing counterpart (pending message) for message with id: {} and type: {}.",
+                                message.getMessageId(), message.getMessageType());
                     }
                     break;
                 }
                 default:
-                    logger.error("Illegal protocol, invalid message type: {}", messageId);
+                    logger.error("Illegal protocol, invalid message type: {}", message.getMessageType());
                     return;
             }
         }
@@ -237,91 +249,57 @@ public class Messaging implements Startable
         }
     }
 
-    public void onNodeDrop(final INodeAddress address)
+    public void onNodeDrop(final NodeAddress address)
     {
         // could be used to decrease the timeout of messages sent to failed nodes.
     }
 
-
-    public void sendResponse(INodeAddress to, int messageType, int messageId, Object res)
+    public void sendResponse(NodeAddress to, int messageType, int messageId, Object res)
     {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         try
         {
-            ObjectOutput objectOutput = createObjectOutput(byteArrayOutputStream);
-            objectOutput.writeByte(messageType);
-            objectOutput.writeInt(messageId);
-            objectOutput.writeObject(res);
-            objectOutput.flush();
+            messageSerializer.serializeMessage(execution, byteArrayOutputStream,
+                    new Message()
+                            .withMessageId(messageId)
+                            .withMessageType(messageType)
+                            .withPayload(res));
         }
-        catch (IOException e)
+        catch (Exception e)
         {
             throw new UncheckedException(e);
         }
         clusterPeer.sendMessage(to, byteArrayOutputStream.toByteArray());
     }
 
-    private ObjectOutput createObjectOutput(final OutputStream outputStream) throws IOException
-    {
-        return new ObjectOutputStream(outputStream)
-        {
-            {
-                enableReplaceObject(true);
-            }
-
-            @Override
-            protected Object replaceObject(final Object obj) throws IOException
-            {
-                if (!(obj instanceof ActorReference))
-                {
-                    if (obj instanceof OrbitActor)
-                    {
-                        return ((OrbitActor) obj).reference;
-                    }
-                    if (obj instanceof IActorObserver)
-                    {
-                        return execution.getObjectReference(null, (IActorObserver) obj);
-                    }
-                }
-                return super.replaceObject(obj);
-            }
-        };
-    }
-
-    public Task<?> sendMessage(INodeAddress to, boolean oneWay, int interfaceId, int methodId, Object key, Object[] params)
+    public Task<?> sendMessage(Message message)
     {
         int messageId = messageIdGen.incrementAndGet();
-        PendingResponse pendingResponse = new PendingResponse();
-        pendingResponse.messageId = messageId;
-        pendingResponse.timeoutAt = clock.millis() + responseTimeoutMillis;
+        message.setMessageId(messageId);
+        PendingResponse pendingResponse = new PendingResponse(messageId, clock.millis() + responseTimeoutMillis);
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         try
         {
-            ObjectOutput objectOutput = createObjectOutput(byteArrayOutputStream);
-            objectOutput.writeByte(oneWay ? 8 : 0);
-            objectOutput.writeInt(messageId);
-            objectOutput.writeInt(interfaceId);
-            objectOutput.writeInt(methodId);
-            objectOutput.writeObject(key);
-            objectOutput.writeObject(params);
-            objectOutput.flush();
+            messageSerializer.serializeMessage(execution, byteArrayOutputStream, message);
         }
         catch (Exception | Error e)
         {
             if (logger.isErrorEnabled())
             {
-                logger.error("Error sending message to object key " + key, e);
+                logger.error("Error sending message", e);
             }
-            throw new UncheckedException(e);
+            return Task.fromException(new UncheckedException(e));
         }
+        final boolean oneWay = message.isOneWay();
         if (!oneWay)
         {
+
             pendingResponseMap.put(messageId, pendingResponse);
             pendingResponsesQueue.add(pendingResponse);
         }
         try
         {
-            clusterPeer.sendMessage(to, byteArrayOutputStream.toByteArray());
+            clusterPeer.sendMessage(message.getToNode(), byteArrayOutputStream.toByteArray());
             if (oneWay)
             {
                 pendingResponse.internalComplete(NIL);
@@ -362,6 +340,5 @@ public class Messaging implements Startable
     {
         this.executor = pool;
     }
-
 
 }

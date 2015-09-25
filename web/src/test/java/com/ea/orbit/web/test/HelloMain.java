@@ -28,18 +28,22 @@
 
 package com.ea.orbit.web.test;
 
-import com.ea.orbit.container.OrbitContainer;
+import com.ea.orbit.container.Container;
+import com.ea.orbit.web.WebModule;
 
-import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 public class HelloMain
 {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(HelloMain.class);
-
     public static void main(final String args[]) throws Exception
     {
-        OrbitContainer container = new OrbitContainer();
-        container.setProperties(Collections.singletonMap("orbit.http.port",8080));
+        Container container = new Container();
+        Map<String,Object> props = new HashMap<>();
+        props.put("orbit.http.port", 8080);
+        props.put("orbit.components", Arrays.asList(WebModule.class, Module1.class));
+        container.setProperties(props);
         container.start();
         System.in.read();
         container.stop();

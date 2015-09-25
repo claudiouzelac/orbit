@@ -33,14 +33,13 @@
     <parent>
         <artifactId>orbit-actors-parent</artifactId>
         <groupId>com.ea.orbit</groupId>
-        <version>0.1.2-SNAPSHOT</version>
+        <version>0.5.0-SNAPSHOT</version>
         <relativePath>..</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.ea.orbit</groupId>
-    <artifactId>orbit-actors-all</artifactId>
     <name>Orbit Actors All</name>
+    <artifactId>orbit-actors-all</artifactId>
 
     <properties>
         <quickbuild>true</quickbuild>
@@ -51,6 +50,7 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <!--  Unpack all class files  -->
@@ -112,6 +112,7 @@
                 </executions>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
                 <executions>
                     <execution>
@@ -193,6 +194,11 @@
         <dependency>
             <groupId>com.ea.orbit</groupId>
             <artifactId>orbit-actors-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.ea.orbit</groupId>
+            <artifactId>orbit-actors-server</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

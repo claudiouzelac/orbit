@@ -28,18 +28,25 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.ea.orbit.container.test;
 
-import com.ea.orbit.container.OrbitContainer;
+import com.ea.orbit.container.Container;
 import com.ea.orbit.container.test.module.test.Class1;
 import com.ea.orbit.container.test.module.test.Class2;
 import com.ea.orbit.container.test.module.test.Module1;
 
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
+@SuppressWarnings("unused")
 public class ModuleTest
 {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ModuleTest.class);
+    private static final Logger logger = LoggerFactory.getLogger(ModuleTest.class);
 
     @Test
     public void testModule()
@@ -56,7 +63,7 @@ public class ModuleTest
     {
         final Module1 module = new Module1();
 
-        final OrbitContainer container = new OrbitContainer();
+        final Container container = new Container();
         container.add(Module1.class);
         container.start();
         final Class2 c2 = container.get(Class2.class);
@@ -65,16 +72,4 @@ public class ModuleTest
         assertNotSame(container.get(Class1.class), container.get(Class1.class));
     }
 
-    @Test
-    public void testModuleDiscovery()
-    {
-        final Module1 module = new Module1();
-
-        final OrbitContainer container = new OrbitContainer();
-        container.start();
-        final Class2 c2 = container.get(Class2.class);
-        assertTrue(c2.started);
-        assertSame(c2, container.get(Class2.class));
-        assertNotSame(container.get(Class1.class), container.get(Class1.class));
-    }
 }

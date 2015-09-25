@@ -29,9 +29,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.IActor;
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.runtime.OrbitActor;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.runtime.AbstractActor;
 import com.ea.orbit.concurrent.Task;
 
 import org.junit.Test;
@@ -40,28 +40,33 @@ import java.util.ArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
+@SuppressWarnings("unused")
 public class MessagingTest extends ActorBaseTest
 {
 
-    public static interface IBlockingResponder extends IActor
+    public static interface BlockingResponder extends Actor
     {
-        Task blockOnReceiving(final int semaphoreIndex);
+        Task<?> blockOnReceiving(final int semaphoreIndex);
 
         Task<String> receiveAndRespond();
 
         Task<String> justRespond();
     }
-    static Semaphore semaphores[] = new Semaphore[] { new Semaphore(0), new Semaphore(0) };
 
-    public static class BlockingResponder extends OrbitActor implements IBlockingResponder
+    static Semaphore semaphores[] = new Semaphore[]{new Semaphore(0), new Semaphore(0)};
+
+    @SuppressWarnings("rawtypes")
+    public static class BlockingResponderActor extends AbstractActor implements BlockingResponder
     {
-        public Task blockOnReceiving(final int semaphoreIndex)
+        public Task<?> blockOnReceiving(final int semaphoreIndex)
         {
             // blocking the message receiver thread.
             // If the system was correctly implemented this will not block other actors from receiving messages.
-            return BlockingResponderFactory.getReference("0").justRespond().thenRun(() ->
+            return Actor.getReference(BlockingResponder.class, "0").justRespond().thenRun(() ->
                     {
                         try
                         {
@@ -83,7 +88,7 @@ public class MessagingTest extends ActorBaseTest
         public Task<String> receiveAndRespond()
         {
             // Calls another actor and returns that actor's response
-            return BlockingResponderFactory.getReference("0").justRespond().thenApply(
+            return Actor.getReference(BlockingResponder.class, "0").justRespond().thenApply(
                     x ->
                     {
                         getLogger().debug("message received: " + x);
@@ -114,13 +119,13 @@ public class MessagingTest extends ActorBaseTest
     @Test
     public void blockingReceptionTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage client = createClient();
+        Stage stage1 = createStage();
+        Stage client = createClient();
 
-        IBlockingResponder blockingResponder = client.getReference(IBlockingResponder.class, "1");
-        IBlockingResponder responder = client.getReference(IBlockingResponder.class, "free");
-        final Task blockedRes = blockingResponder.blockOnReceiving(0);
-        final Task res = responder.receiveAndRespond();
+        BlockingResponder blockingResponder = Actor.getReference(BlockingResponder.class, "1");
+        BlockingResponder responder = Actor.getReference(BlockingResponder.class, "free");
+        final Task<?> blockedRes = blockingResponder.blockOnReceiving(0);
+        final Task<?> res = responder.receiveAndRespond();
         assertEquals("hello", res.join());
         assertFalse(blockedRes.isDone());
         semaphores[0].release(1);
@@ -136,19 +141,19 @@ public class MessagingTest extends ActorBaseTest
     @Test
     public void blockingReceptionTestWithABunch() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage client = createClient();
+        Stage stage1 = createStage();
+        Stage client = createClient();
 
-        IBlockingResponder blockingResponder2 = client.getReference(IBlockingResponder.class, "free");
-        ArrayList<Task> blocked = new ArrayList<>();
+        BlockingResponder blockingResponder2 = Actor.getReference(BlockingResponder.class, "free");
+        ArrayList<Task<?>> blocked = new ArrayList<>();
         for (int i = 0; i < 20; i++)
         {
-            IBlockingResponder blockingResponder1 = client.getReference(IBlockingResponder.class, "100" + i);
+            BlockingResponder blockingResponder1 = Actor.getReference(BlockingResponder.class, "100" + i);
             blocked.add(blockingResponder1.blockOnReceiving(1));
         }
         // bad practice, but just to ensure that the other messages have get there before this last one.
         Thread.sleep(5);
-        final Task res2 = blockingResponder2.receiveAndRespond();
+        final Task<?> res2 = blockingResponder2.receiveAndRespond();
         long start = System.currentTimeMillis();
         assertEquals("hello", res2.join());
         assertTrue(System.currentTimeMillis() - start < 30000);

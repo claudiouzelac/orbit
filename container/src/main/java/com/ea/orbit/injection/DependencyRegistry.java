@@ -28,18 +28,20 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.ea.orbit.injection;
 
+import com.ea.orbit.annotation.Wired;
 import com.ea.orbit.exception.UncheckedException;
 
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Very basic injection library.
@@ -47,11 +49,12 @@ import java.util.Set;
  * Request based injection can be done by composition (adding the parent singletons to the request Registry)
  * <p/>
  * Please note: The parent registry should not be modified once the request/child contexts start running in their threads.
+ * This class it not thread safe.
  */
 public class DependencyRegistry
 {
     private final DependencyRegistry parent;
-    private final Map<Class<?>, Object[]> singletons = new HashMap<>();
+    private final Map<Class<?>, Object[]> singletons = new ConcurrentHashMap<>();
 
     private final Set<Object> currentlyInjecting = new HashSet<>();
 
@@ -65,19 +68,23 @@ public class DependencyRegistry
         this.parent = parent;
     }
 
-    public <T> T locate(final Class<T> clazz)
+    protected <T> T locate(final Class<T> clazz, boolean create)
     {
         T o = getSingleton(clazz);
         if (o == null && parent != null)
         {
-            o = parent.getSingleton(clazz);
+            o = parent.locate(clazz, false);
         }
         if (o != null)
         {
             return o;
         }
+        return create ? createNew(clazz) : null;
+    }
 
-        return createNew(clazz);
+    public <T> T locate(final Class<T> clazz)
+    {
+        return locate(clazz, true);
     }
 
     protected <T> T createNew(final Class<T> clazz)
@@ -135,7 +142,15 @@ public class DependencyRegistry
             }
             if (o == null)
             {
-                return null;
+                if (parent == null && clazz.isAnnotationPresent(Singleton.class))
+                {
+                    singletons.put(clazz, new Object[1]);
+                    o = singletons.get(clazz);
+                }
+                else
+                {
+                    return null;
+                }
             }
         }
         if (o[0] == null)
@@ -145,9 +160,13 @@ public class DependencyRegistry
                 o[0] = aClazz.newInstance();
                 return initialize(aClazz, (T) o[0], true);
             }
-            catch (InstantiationException | IllegalAccessException e)
+            catch (Exception e)
             {
-                throw new UncheckedException(e);
+                throw new UncheckedException("Error instantiating: "+ aClazz.getName(), e);
+            }
+            catch (Error e)
+            {
+                throw new UncheckedException("Error instantiating: "+ aClazz.getName(), e);
             }
 
         }
@@ -156,7 +175,7 @@ public class DependencyRegistry
 
     public void addSingleton(final Class<?> c, final Object object)
     {
-        singletons.put(c, new Object[]{object});
+        singletons.put(c, new Object[]{ object });
     }
 
     public void addSingleton(final Class<?> c)
@@ -193,7 +212,7 @@ public class DependencyRegistry
 
     protected void injectField(final Object o, final Field f) throws IllegalAccessException
     {
-        if (f.isAnnotationPresent(Inject.class))
+        if (f.isAnnotationPresent(Inject.class) || f.isAnnotationPresent(Wired.class))
         {
             f.setAccessible(true);
             final Object located = locate(f.getType());
@@ -217,7 +236,7 @@ public class DependencyRegistry
                     }
                     catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e)
                     {
-                        throw new UncheckedException(e);
+                        throw new UncheckedException("Error calling post construct " + m, e);
                     }
                 }
             }

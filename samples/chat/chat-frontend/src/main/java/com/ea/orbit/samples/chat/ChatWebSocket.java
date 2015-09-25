@@ -29,6 +29,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.samples.chat;
 
 
+import com.ea.orbit.actors.Actor;
 import com.ea.orbit.concurrent.Task;
 
 import javax.json.Json;
@@ -43,25 +44,32 @@ import javax.websocket.Session;
 import javax.websocket.server.ServerEndpoint;
 
 import java.io.StringReader;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 
 @ServerEndpoint("/sample/chat/{chatName}")
 public class ChatWebSocket
 {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ChatWebSocket.class);
-    private IChat chat;
-    private IChatObserver observer;
+    private Chat chat;
+    private ChatObserver observer;
 
     @OnOpen
     public void onWebSocketConnect(Session session)
     {
-        chat = ChatFactory.getReference(session.getPathParameters().get("chatName"));
-        observer = new IChatObserver()
+        chat = Actor.getReference(Chat.class, session.getPathParameters().get("chatName"));
+        observer = new ChatObserver()
         {
             @Override
             public Task<Void> receiveMessage(final ChatMessageDto message)
             {
-                JsonObject jsonObject = Json.createObjectBuilder().add("message", message.getMessage()).add("sender", message.getSender()).build();
+                JsonObject jsonObject = Json.createObjectBuilder()
+                        .add("message", message.getMessage())
+                        .add("sender", message.getSender())
+                        .add("received", ZonedDateTime.ofInstant(message.getWhen().toInstant(), ZoneId.systemDefault()).format(DateTimeFormatter.ISO_INSTANT))
+                        .build();
 
                 session.getAsyncRemote().sendObject(jsonObject.toString());
                 return Task.done();
@@ -71,7 +79,15 @@ public class ChatWebSocket
 
         chat.getHistory(100).thenAccept(ms -> {
                     JsonArrayBuilder array = Json.createArrayBuilder();
-                    ms.stream().forEach(m -> array.add(Json.createObjectBuilder().add("message", m.getMessage()).add("sender", m.getSender()).build()));
+                    ms.stream().forEach(
+                            m -> array.add(
+                                    Json.createObjectBuilder()
+                                            .add("message", m.getMessage())
+                                            .add("sender", m.getSender())
+                                            .add("received", m.getWhen().toInstant().atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ISO_INSTANT))
+                                            .build()
+                            )
+                    );
                     session.getAsyncRemote().sendObject(
                             Json.createObjectBuilder().add("history", array).build().toString());
                 }

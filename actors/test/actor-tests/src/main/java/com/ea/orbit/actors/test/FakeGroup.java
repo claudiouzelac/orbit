@@ -28,8 +28,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.ea.orbit.actors.test;
 
-import com.ea.orbit.actors.cluster.INodeAddress;
 import com.ea.orbit.actors.cluster.NodeAddress;
+import com.ea.orbit.actors.cluster.NodeAddressImpl;
 import com.ea.orbit.concurrent.ExecutorUtils;
 import com.ea.orbit.concurrent.Task;
 import com.ea.orbit.exception.UncheckedException;
@@ -69,9 +69,10 @@ public class FakeGroup
                 }
             });
 
-    private Map<INodeAddress, FakeClusterPeer> currentChannels = new HashMap<>();
+    private Map<NodeAddress, FakeClusterPeer> currentChannels = new HashMap<>();
 
-    private Object topologyMutex = new Object();
+    private final Object topologyMutex = new Object();
+    @SuppressWarnings("rawtypes")
     private LoadingCache<String, ConcurrentMap> maps = CacheBuilder.newBuilder()
             .build(new CacheLoader<String, ConcurrentMap>()
             {
@@ -90,18 +91,18 @@ public class FakeGroup
         this.clusterName = clusterName;
     }
 
-    protected NodeAddress join(final FakeClusterPeer fakeChannel)
+    protected NodeAddressImpl join(final FakeClusterPeer fakeChannel)
     {
         Collection<CompletableFuture<?>> tasks;
-        NodeAddress nodeAddress;
+        NodeAddressImpl nodeAddress;
         synchronized (topologyMutex)
         {
             final String name = "channel." + (++count) + "." + clusterName;
-            nodeAddress = new NodeAddress(new UUID(name.hashCode(), count));
+            nodeAddress = new NodeAddressImpl(new UUID(name.hashCode(), count));
             currentChannels.put(nodeAddress, fakeChannel);
             fakeChannel.setAddress(nodeAddress);
 
-            final ArrayList<INodeAddress> newView = new ArrayList<>(currentChannels.keySet());
+            final ArrayList<NodeAddress> newView = new ArrayList<>(currentChannels.keySet());
 
             tasks = currentChannels.values().stream().map(ch -> CompletableFuture.runAsync(() -> ch.onViewChanged(newView), pool)).collect(Collectors.toList());
         }
@@ -113,18 +114,17 @@ public class FakeGroup
     public void leave(final FakeClusterPeer fakeClusterPeer)
     {
         List<CompletableFuture<?>> tasks;
-        NodeAddress nodeAddress;
         synchronized (topologyMutex)
         {
             currentChannels.remove(fakeClusterPeer.localAddress());
-            final ArrayList<INodeAddress> newView = new ArrayList<>(currentChannels.keySet());
+            final ArrayList<NodeAddress> newView = new ArrayList<>(currentChannels.keySet());
             tasks = currentChannels.values().stream().map(ch -> CompletableFuture.runAsync(() -> ch.onViewChanged(newView), pool)).collect(Collectors.toList());
         }
         Task.allOf(tasks).join();
     }
 
 
-    public void sendMessage(final INodeAddress from, final INodeAddress to, final byte[] buff)
+    public void sendMessage(final NodeAddress from, final NodeAddress to, final byte[] buff)
     {
         CompletableFuture.runAsync(() -> {
             try
@@ -147,8 +147,7 @@ public class FakeGroup
     {
         try
         {
-            final FakeGroup fakeGroup = groups.get(clusterName);
-            return fakeGroup;
+            return groups.get(clusterName);
         }
         catch (ExecutionException e)
         {
@@ -156,6 +155,7 @@ public class FakeGroup
         }
     }
 
+    @SuppressWarnings("unchecked")
     public <K, V> ConcurrentMap<K, V> getCache(final String name)
     {
         try
@@ -166,6 +166,11 @@ public class FakeGroup
         {
             throw new UncheckedException(e);
         }
+    }
+
+    public Map<String, ConcurrentMap> getCaches()
+    {
+        return maps.asMap();
     }
 
     Executor pool()

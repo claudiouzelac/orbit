@@ -29,11 +29,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.ea.orbit.actors.test;
 
 
-import com.ea.orbit.actors.OrbitStage;
-import com.ea.orbit.actors.cluster.INodeAddress;
-import com.ea.orbit.actors.test.actors.ISomeActor;
-import com.ea.orbit.actors.test.actors.ISomeChatObserver;
-import com.ea.orbit.actors.test.actors.ISomeChatRoom;
+import com.ea.orbit.actors.Actor;
+import com.ea.orbit.actors.Stage;
+import com.ea.orbit.actors.cluster.NodeAddress;
+import com.ea.orbit.actors.runtime.ActorReference;
+import com.ea.orbit.actors.test.actors.SomeActor;
+import com.ea.orbit.actors.test.actors.SomeChatRoom;
 import com.ea.orbit.concurrent.Task;
 
 import org.apache.commons.lang3.tuple.Pair;
@@ -51,14 +52,15 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+@SuppressWarnings("unused")
 public class ClientTest extends ActorBaseTest
 {
-    public static class SomeChatObserver implements ISomeChatObserver
+    public static class SomeChatObserver implements com.ea.orbit.actors.test.actors.SomeChatObserver
     {
-        BlockingQueue<Pair<ISomeChatObserver, String>> messagesReceived = new LinkedBlockingQueue<>();
+        BlockingQueue<Pair<com.ea.orbit.actors.test.actors.SomeChatObserver, String>> messagesReceived = new LinkedBlockingQueue<>();
 
         @Override
-        public Task<Void> receiveMessage(final ISomeChatObserver sender, final String message)
+        public Task<Void> receiveMessage(final com.ea.orbit.actors.test.actors.SomeChatObserver sender, final String message)
         {
             messagesReceived.add(Pair.of(sender, message));
             return Task.done();
@@ -69,29 +71,32 @@ public class ClientTest extends ActorBaseTest
     @Test
     public void basicClientTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage = createStage();
-        OrbitStage client = createClient();
-        ISomeActor player = client.getReference(ISomeActor.class, "232");
+        Stage stage = createStage();
+        Stage client = createClient();
+        SomeActor player = Actor.getReference(SomeActor.class, "232");
+        client.bind();
         assertEquals("bla", player.sayHello("meh").get());
     }
 
     @Test
     public void observerTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage stage1 = createStage();
-        OrbitStage stage2 = createStage();
-        OrbitStage client1 = createClient();
-        OrbitStage client2 = createClient();
+        Stage stage1 = createStage();
+        Stage stage2 = createStage();
+        Stage client1 = createClient();
+        Stage client2 = createClient();
 
         SomeChatObserver observer1 = new SomeChatObserver();
         SomeChatObserver observer2 = new SomeChatObserver();
         {
-            ISomeChatRoom chatRoom = client1.getReference(ISomeChatRoom.class, "chat");
+            SomeChatRoom chatRoom = Actor.getReference(SomeChatRoom.class, "chat");
+            client1.bind();
             chatRoom.join(observer1).get();
         }
         {
-            ISomeChatRoom chatRoom = client2.getReference(ISomeChatRoom.class, "chat");
-            final ISomeChatObserver reference = client2.getObserverReference(observer2);
+            client2.bind();
+            SomeChatRoom chatRoom = Actor.getReference(SomeChatRoom.class, "chat");
+            final com.ea.orbit.actors.test.actors.SomeChatObserver reference = client2.getObserverReference(observer2);
             chatRoom.join(reference).get();
             chatRoom.sendMessage(reference, "bla");
         }
@@ -102,18 +107,18 @@ public class ClientTest extends ActorBaseTest
     @Test
     public void lonelyClientTest() throws ExecutionException, InterruptedException
     {
-        OrbitStage client = createClient();
-        ISomeActor player = client.getReference(ISomeActor.class, "232");
+        Stage client = createClient();
+        SomeActor player = Actor.getReference(SomeActor.class, "232");
         client.getHosting().setTimeToWaitForServersMillis(100);
         expectException(() -> player.sayHello("meh"));
     }
 
-    @Test
+	@Test
     public void ensureNoObjectsAreCreatedClientTest() throws ExecutionException, InterruptedException
     {
-        List<OrbitStage> clients = new ArrayList<>();
-        List<OrbitStage> servers = new ArrayList<OrbitStage>();
-        Set<INodeAddress> serverAddresses = new HashSet<>();
+        List<Stage> clients = new ArrayList<>();
+        List<Stage> servers = new ArrayList<>();
+        Set<NodeAddress> serverAddresses = new HashSet<>();
 
         for (int i = 0; i < 20; i++)
         {
@@ -122,16 +127,17 @@ public class ClientTest extends ActorBaseTest
 
         for (int i = 0; i < 5; i++)
         {
-            final OrbitStage server = createStage();
+            final Stage server = createStage();
             servers.add(server);
             serverAddresses.add(server.getClusterPeer().localAddress());
         }
         for (int i = 0; i < 50; i++)
         {
-            final OrbitStage client = clients.get((int) (Math.random() * clients.size()));
-            ISomeActor player = client.getReference(ISomeActor.class, String.valueOf(i));
-            assertEquals("bla", player.sayHello("meh").get());
-            assertTrue(serverAddresses.contains(client.getHosting().locateActor(player).join()));
+            final Stage client = clients.get((int) (Math.random() * clients.size()));
+            SomeActor player = Actor.getReference(SomeActor.class, String.valueOf(i));
+            client.bind();
+            assertEquals("bla", player.sayHello("meh").join());
+            assertTrue(serverAddresses.contains(client.getHosting().locateActor((ActorReference<?>) player, true).join()));
         }
 
     }
